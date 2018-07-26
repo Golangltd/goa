@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
 	"time"
 
@@ -84,11 +86,10 @@ func main() {
 	}
 
 	data, err := endpoint(context.Background(), payload)
-
 	if debug {
 		doer.(goahttp.DebugDoer).Fprint(os.Stderr)
 	}
-
+	fmt.Println(fmt.Sprintf("error: %#v", err))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
@@ -107,6 +108,30 @@ func main() {
 				m, _ := json.MarshalIndent(d, "", "    ")
 				fmt.Println(string(m))
 			}
+		} else if s, ok := data.(carssvc.AddClientStream); ok {
+			trapCtrlC()
+			fmt.Println("add endpoint")
+			scanner := bufio.NewScanner(os.Stdin)
+			for scanner.Scan() {
+				t := scanner.Text()
+				p, err := buildAddPayload(t)
+				if err != nil {
+					fmt.Println(fmt.Errorf("Error creating payload: %s", err))
+					os.Exit(1)
+				}
+				if err := s.Send(p); err != nil {
+					fmt.Println(fmt.Errorf("Error sending into stream: %s", err))
+					os.Exit(1)
+				}
+			}
+			fmt.Println("after send")
+			d, err := s.Recv()
+			if err != nil {
+				fmt.Println(fmt.Errorf("Error reading from stream: %s", err))
+			}
+			fmt.Println("after recv")
+			m, _ := json.MarshalIndent(d, "", "    ")
+			fmt.Println(string(m))
 		} else {
 			m, _ := json.MarshalIndent(data, "", "    ")
 			fmt.Println(string(m))
@@ -139,4 +164,29 @@ func indent(s string) string {
 		return ""
 	}
 	return "    " + strings.Replace(s, "\n", "\n    ", -1)
+}
+
+// Graceful shutdown
+func trapCtrlC() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt)
+	go func() {
+		for range ch {
+			fmt.Println("\nexiting")
+			os.Exit(0)
+		}
+	}()
+}
+
+// buildAddPayload builds the payload for the cars add endpoint.
+func buildAddPayload(carsAddBody string) (*carssvc.AddPayload, error) {
+	var err error
+	var car carssvc.AddPayload
+	{
+		err = json.Unmarshal([]byte(carsAddBody), &car)
+		if err != nil {
+			return nil, fmt.Errorf("invalid JSON for body, example of valid JSON:\n%s", "'{\n      \"car\": {\n         \"body_style\": \"Laudantium qui minima voluptatibus in incidunt.\",\n         \"make\": \"Aspernatur totam.\",\n         \"model\": \"Vero odio odio id autem.\"\n      }\n   }'")
+		}
+	}
+	return &car, nil
 }

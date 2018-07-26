@@ -20,6 +20,8 @@ type Service interface {
 	Login(context.Context, *LoginPayload) (res string, err error)
 	// Lists car models by body style.
 	List(context.Context, *ListPayload, ListServerStream) (err error)
+	// Add car models.
+	Add(context.Context, *AddPayload, AddServerStream) (err error)
 }
 
 // ServiceName is the name of the service as defined in the design. This is the
@@ -30,7 +32,7 @@ const ServiceName = "cars"
 // MethodNames lists the service method names as defined in the design. These
 // are the same values that are set in the endpoint request contexts under the
 // MethodKey key.
-var MethodNames = [2]string{"login", "list"}
+var MethodNames = [3]string{"login", "list", "add"}
 
 // ListServerStream is the interface a "list" endpoint server stream must
 // satisfy.
@@ -50,6 +52,20 @@ type ListClientStream interface {
 	Recv() (*Car, error)
 }
 
+// AddServerStream is the interface a "add" endpoint server stream must satisfy.
+type AddServerStream interface {
+	// Recv reads instances of "AddPayload" from the stream.
+	Recv() (*AddPayload, error)
+}
+
+// AddClientStream is the interface a "add" endpoint client stream must satisfy.
+type AddClientStream interface {
+	// Send streams instances of "AddPayload".
+	Send(*AddPayload) error
+	// Close closes the stream.
+	Close() error
+}
+
 // Credentials used to authenticate to retrieve JWT token
 type LoginPayload struct {
 	User     string
@@ -65,6 +81,26 @@ type ListPayload struct {
 }
 
 // Car is the result type of the cars service list method.
+type Car struct {
+	// The make of the car
+	Make string
+	// The car model
+	Model string
+	// The car body style
+	BodyStyle string
+}
+
+// AddPayload is the payload type of the cars service add method.
+type AddPayload struct {
+	// Car to add.
+	Car *Car
+	// JWT used for authentication
+	Token *string
+}
+
+// CarCollection is the result type of the cars service add method.
+type CarCollection []*Car
+
 type Car struct {
 	// The make of the car
 	Make string
@@ -121,6 +157,29 @@ func NewViewedCar(res *Car, view string) *carssvcviews.Car {
 	return vres
 }
 
+// NewCarCollection initializes result type CarCollection from viewed result
+// type CarCollection.
+func NewCarCollection(vres carssvcviews.CarCollection) CarCollection {
+	var res CarCollection
+	switch vres.View {
+	case "default", "":
+		res = newCarCollection(vres.Projected)
+	}
+	return res
+}
+
+// NewViewedCarCollection initializes viewed result type CarCollection from
+// result type CarCollection using the given view.
+func NewViewedCarCollection(res CarCollection, view string) carssvcviews.CarCollection {
+	var vres carssvcviews.CarCollection
+	switch view {
+	case "default", "":
+		p := newCarCollectionView(res)
+		vres = carssvcviews.CarCollection{p, "default"}
+	}
+	return vres
+}
+
 // newCar converts projected type Car to service type Car.
 func newCar(vres *carssvcviews.CarView) *Car {
 	res := &Car{}
@@ -143,6 +202,26 @@ func newCarView(res *Car) *carssvcviews.CarView {
 		Make:      &res.Make,
 		Model:     &res.Model,
 		BodyStyle: &res.BodyStyle,
+	}
+	return vres
+}
+
+// newCarCollection converts projected type CarCollection to service type
+// CarCollection.
+func newCarCollection(vres carssvcviews.CarCollectionView) CarCollection {
+	res := make(CarCollection, len(vres))
+	for i, n := range vres {
+		res[i] = newCar(n)
+	}
+	return res
+}
+
+// newCarCollectionView projects result type CarCollection into projected type
+// CarCollectionView using the "default" view.
+func newCarCollectionView(res CarCollection) carssvcviews.CarCollectionView {
+	vres := make(carssvcviews.CarCollectionView, len(res))
+	for i, n := range res {
+		vres[i] = newCarView(n)
 	}
 	return vres
 }
